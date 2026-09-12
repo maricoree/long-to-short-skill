@@ -1,11 +1,12 @@
 ---
 name: long-to-short
-description: Cut a 15-30 second vertical short out of a long video plus its SRT: a layout preset decides the composition, captions are burned in one short phrase at a time, and the title, description, hashtags and tags come out of the same run. Ships a default look and can measure another from a reference screenshot or an existing short. Use when the user points at a long video and subtitles and asks for a short / short-form clip / вертикальный шортс.
+description: Cut a 15-30 second vertical short out of a long video — with subtitles or without, transcribing it first when there are none: a layout preset decides the composition, captions are burned in one short phrase at a time, and the title, description, hashtags and tags come out of the same run. Ships a default look and can measure another from a reference screenshot or an existing short. Use when the user points at a long video and asks for a short / short-form clip / вертикальный шортс, whether or not they have an .srt.
 ---
 
 # Make a short out of a long video
 
-Input: a long video and its `captions.srt`.
+Input: a long video — **with subtitles or without.** A missing `.srt` is not a
+reason to stop and not a chore to hand back: the kit makes one (step 1).
 Output: **a finished MP4**, plus the upload metadata (title, description,
 hashtags, tags) — which is part of the deliverable, not an afterthought.
 
@@ -32,10 +33,15 @@ fragment after that is a one-line render.
   darkened.
 - **Do not invent captions, effects or composition.** The captions come from
   the SRT; the style comes from the preset.
-- **Settle the look once, before the first render — never a second time.** A
-  reference settles it silently; with no reference, ask one question (step 0).
-  A render costs ~35 s, so asking once is cheaper than being wrong, and asking
-  twice is only friction.
+- **Never send the user off to make a subtitle file.** If they have none, you
+  make one — `tools/transcribe.py` (step 1). They asked for a short, not for
+  homework. Ask the question once, in the same round as the look, and then act
+  on the answer yourself.
+- **Settle the inputs and the look once, before the first render — never a
+  second time.** A reference settles the look silently; with no reference, ask
+  one round of questions (step 0). A render costs ~35 s and a transcription
+  costs minutes, so asking once is cheaper than being wrong, and asking twice
+  is only friction.
 - **Never reuse a fragment that has already been published.** Finished pieces
   get named by their opening phrase — pass them all to `--used` and let the
   tool exclude them.
@@ -60,6 +66,8 @@ look at it. Do not build a machine to look at it for you.
 
 | tool | answers | cost |
 |---|---|---|
+| `tools/transcribe.py <video> --list-streams` | does this file already carry subtitles, and in what language | ~2 s |
+| `tools/transcribe.py <video>` | the missing SRT — an embedded text track if there is one, else speech recognition | 2 s, or minutes |
 | `tools/pick_fragment.py <video> <srt> [--used …]` | the SRT's offset, the silence gaps, and every unused 15-30 s window with its opening phrase | ~10 s |
 | `tools/pick_fragment.py <video> <srt> --check T0 DUR` | are both ends in a silence, are any cues cut into, how many caption lines | ~10 s |
 | `tools/build_short.py --src … --t0 … --dur … --out …` | the finished MP4 (two passes: composition, then captions) | ~35 s |
@@ -67,17 +75,65 @@ look at it. Do not build a machine to look at it for you.
 
 ## Procedure
 
-### 0. Settle the look (one question, once)
+### 0. Settle the inputs and the look (one round, once)
 
-Everything visible except the caption *wording* comes from the preset, so this
-is decided before anything is rendered — but it is one question, not a
-questionnaire, and never a second time.
+Three things have to be decided before anything is rendered. They are asked
+**together, in one round**, and then never again for the session. Use one
+`AskUserQuestion` call with all of them — a round costs the user a wait, and a
+second round costs another one.
+
+**First: where do the captions come from?** The kit needs an SRT, and most
+people pointing at a long video do not have one. That is one question:
+
+- **They name an `.srt`** — use it. This is the case the offset step exists
+  for: a file a human authored runs ahead of the speaker by a constant.
+- **They have none** — **you transcribe it** (step 1). Do not suggest they go
+  and make one, do not hand them a command to run, and do not treat the missing
+  file as a reason to stop and ask again. Say you are doing it and roughly how
+  long it will take, then do it.
+- **They are not sure, or the video was downloaded from somewhere** — run
+  `transcribe.py --list-streams` first. A `.mkv` often already carries a text
+  subtitle track in one or more languages; extracting one takes two seconds and
+  is exact. A *bitmap* track (PGS, VobSub, DVB) cannot be turned into text
+  without OCR — the tool says so and transcribes instead.
+
+**Second: how hard should the transcription try?** Only ask this when the
+answer above was "none" or "not sure" — with a supplied `.srt` there is nothing
+to transcribe and the question is noise. Ask it anyway when you asked the first
+one, in the same call, and ignore the answer if it turns out not to apply: one
+round with a spare question is cheaper than two rounds.
+
+Put it in **minutes and megabytes, never in model names** — `small`, `medium`
+and `large-v3` mean nothing to the person answering. And there is **no faster
+tier to offer them**: measured on a 6-core desktop CPU, `tiny`, `base` and
+`small` all take about the same time on the same file — 71 s / 90 s / 72 s for
+the same 397 s of audio, so `base` is in fact the *slowest* of the three. A
+smaller model buys a smaller **download**, and costs accuracy. It does not buy
+time. So there are two tiers, not three:
+
+| what to say | flag | what it costs | when it is the answer |
+|---|---|---|---|
+| **The default** | `--model small` | 464 MB the first time, nothing after that | clean narration, one speaker, studio or close mic. Say this is the default and that they can just take it |
+| **Hard audio** | `--model medium` | 1.5 GB the first time, and slower to run | heavy accents, crosstalk, music under the speech, phone or room recording |
+
+Offer the second only when they describe the audio as hard. Give the wait in
+minutes and the download in megabytes — the tool prints both before it starts
+(for a 30-minute video the default is roughly 15-65 minutes).
+
+Do **not** offer `tiny`. It is not a smaller version of the same answer — the
+language detector goes first, and on clean English narration it called the file
+Russian at p=0.69 and returned Cyrillic transliteration of English sounds. A
+whole file of confident nonsense is worse than any wait, and it is not even
+faster, so there is nothing on the other side of that scale.
+
+**Third: what should it look like?** Everything visible except the caption
+*wording* comes from the preset, so it is settled before the first render.
 
 - **If the user gave a reference** — a screenshot of the target frame, or a
   short they want to match — that *is* the answer. Derive the preset from it
   (see *Deriving a look*) and render. Do not ask.
-- **If they did not**, ask once, with three concrete answers rather than an
-  open "what do you want":
+- **If they did not**, offer three concrete answers rather than an open "what
+  do you want":
   1. **the shipped default** — say what it actually is in a few words: the
      fragment centre-cropped above the middle, over a blurred darkened copy of
      itself, with captions in the lower third, white with a heavy black stroke,
@@ -86,12 +142,104 @@ questionnaire, and never a second time.
   3. **explicit numbers** — `--canvas`, `--chars`, `--font-px`, `--font`, or a
      preset file.
 
-Then render with whatever they chose, and **do not ask again for the rest of
-the session**: the answer carries over to every further fragment. If they pick
-(1) because they do not care, that is a real answer — do not re-litigate it on
-the next short.
+Then work with whatever they chose, and **do not ask again for the rest of the
+session**: both answers carry over to every further fragment. If they pick (1)
+because they do not care, that is a real answer — do not re-litigate it on the
+next short.
 
-### 1. Pick the fragment (2 min)
+### 1. Get the captions (only when there are none)
+
+```bash
+python tools/transcribe.py LONG.mp4 --out caps.srt
+```
+
+It tries the cheap thing first and says which it did:
+
+| what the file has | what happens | cost |
+|---|---|---|
+| a text subtitle track | extracted with ffmpeg, timings untouched | ~2 s |
+| nothing | faster-whisper (`pip install faster-whisper`), int8 on CPU | minutes |
+
+`--list-streams` shows what is in the file without doing anything. For a long
+video the model is the slow part, so it prints the audio length and an expected
+time before it starts, then reports progress.
+
+**The model was settled in step 0 — use what was chosen and do not re-open it.**
+The scale is `small` (the default), `medium` (slower, and better on hard audio
+or heavy accents) and `large-v3`, plus `base` and `tiny` below the default —
+but the user was asked in minutes and megabytes, not in those names, so
+translate back rather than quoting the flag at them. `base` and `tiny` exist
+and download less; they are not faster, and `tiny` is worse at the language.
+If step 0 never happened because there were subtitles and no transcription was
+needed, the choice does not arise. If you are here *without* having asked — a
+`.srt` turned out to be unusable, say — take `small`. Reach for a bigger model
+without asking when the audio is genuinely hard (heavy accents, crosstalk,
+music under speech) or when `small` has visibly produced rubbish; `medium` and
+`large-v3` download 1.5-3 GB first. Pass `--lang` when you know it — it skips
+detection and it is more accurate than detection.
+
+**Do not go below `base` — and do not trust the language line on any tier.**
+Two separate things, and the measurements separate them. On clean English
+narration, 20 s and 397 s:
+
+- `tiny` got the language wrong on **both** files — `ru` at p=0.69 on a 20 s
+  clip, and Cyrillic transliteration of English sounds on every cue of a 397 s
+  one.
+- `base` and `small` both read that 20 s clip as English at p=1.00 — and **both
+  got the 397 s file wrong**: `base` said `lv` (0.40), `small` said `ru` (0.31).
+- A 20 s cut of the *397 s* file was still misread (`small`, `ru`, p=0.26), so
+  this is not about file length or model size — it is that voice.
+- Forcing `--lang en` on the 397 s file gave clean correct English at both
+  sizes. The audio was never ambiguous; only the detector was.
+
+So `base` is the floor, and that is the whole of what the tier numbers support
+— the failure that actually bites is not a tier at all. Whisper picks the
+language from the opening window and commits; when it picks wrong it does not
+degrade the transcript, it **replaces** it with fluent nonsense that nothing
+downstream can tell from a real transcript, and step 2 will happily measure a
+"constant offset" inside it. **When you can name the language, pass `--lang`** —
+it skips detection and beats it. When you cannot, read the confidence: the tool
+now says so out loud below 0.70, because that number is the detector shrugging
+rather than deciding. If the text comes out in the wrong language, re-run with
+`--lang XX --force` — the tool will not overwrite an existing `.srt` without
+`--force`.
+
+Never re-transcribe what is already there. The output lands beside the video
+under the video's own name, so a second run finds it and stops.
+
+**The first run downloads the model, and the download is silent.** Nothing is
+fetched unless speech recognition is actually needed — a file with a text
+subtitle track, or a supplied `.srt`, costs no download at all. But when the
+fallback does run, the weights come from HuggingFace on first use and are cached
+in `~/.cache/huggingface/hub` (Windows: `C:\Users\<you>\.cache\huggingface\hub`)
+for every run after. No token or account is needed, which also means an
+unauthenticated, rate-limited fetch — measured at about 1 MB/s, so `small`
+(464 MB) is roughly eight minutes before transcription even starts. The tool
+prints the size, the path, and whether the weights are already cached, and it
+prints them for a reason: `huggingface_hub` only draws its progress bar on a
+terminal, so when this is run by an agent or piped to a log the fetch shows
+**nothing at all** and looks exactly like a hang. Do not kill it. Sizes: `tiny`
+75 MB, `base` 141 MB, `small` 464 MB, `medium` 1.5 GB, `large-v3` 2.9 GB.
+
+Set `HF_TOKEN` if you have one — the fetch above is unauthenticated precisely
+because no token is required, and HuggingFace rate-limits anonymous traffic.
+
+**A transcript made here is not like one you were given.** A human-authored
+subtitle file runs ahead of the speaker by a constant — that is what "the
+captions run fast" almost always is — and step 2 measures it. A file made here
+is timed off this video's own audio, so **there is no offset to find: expect
+about 0.00 and leave `--cap-shift` alone.** A weak offset reading on a
+self-made transcript is the expected answer, not a discovery, and not a reason
+to go looking for a shift that is not there.
+
+The one real hazard is hallucination: whisper invents text over music and
+silence, and loops on a phrase, or emits a subtitle credit it half-remembers.
+Burned into a caption track that is a visible defect. The tool drops segments on
+the model's own confidence scores, on boilerplate, and on immediate
+self-repetition — and **prints every drop with its reason**, so read that list.
+It is short, and it is where a bad transcript shows itself.
+
+### 2. Pick the fragment (2 min)
 
 ```bash
 python tools/pick_fragment.py LONG.mp4 caps.srt --used "opening phrase one" "phrase two" --top 25
@@ -125,7 +273,7 @@ Both ends must report a silence. An end in speech is a word cut in half, and
 that starts before the window: the renderer DROPS that cue rather than clipping
 it, because clipping produced 0.02 s stubs of the previous sentence on frame 0.
 
-### 2. Build it (1 min of typing, 35 s of rendering)
+### 3. Build it (1 min of typing, 35 s of rendering)
 
 ```bash
 python tools/build_short.py --src LONG.mp4 --srt caps.srt \
@@ -139,7 +287,7 @@ writes the composition without captions; `--caps-only` re-burns captions onto
 an existing stage1 — use it for every caption-only fix (a shift, a hold, a
 re-split), it is 15 s instead of 35.
 
-### 3. Look at it
+### 4. Look at it
 
 ```bash
 ffmpeg -v error -i OUT.mp4 -vf "select='eq(n\,0)+eq(n\,40)+eq(n\,200)+eq(n\,600)+eq(n\,1000)+eq(n\,1397)',scale=270:-1,tile=6x1" -frames:v 1 -fps_mode passthrough look.png
@@ -161,7 +309,7 @@ the preset's `darken`.
 ffmpeg -v error -ss 5 -i OUT.mp4 -vf "crop=1080:200:0:0,scale=1:1" -frames:v 1 -f rawvideo -pix_fmt gray - | xxd -p
 ```
 
-### 4. Metadata (2 min)
+### 5. Metadata (2 min)
 
 ```bash
 python tools/meta.py --title "…" --desc-file desc.txt --tags "…" --srt caps.srt --t0 146.40 --dur 23.30 --out metadata.txt

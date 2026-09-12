@@ -83,6 +83,32 @@ def read_srt_text(path):
     return " ".join(t for _, _, t in read_srt(path) if t)
 
 
+def fmt_ts(t):
+    """Seconds -> ``HH:MM:SS,mmm``.  Negative clamps to zero."""
+    ms = int(round(max(0.0, t) * 1000.0))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return "%02d:%02d:%02d,%03d" % (h, m, s, ms)
+
+
+def write_srt(cues, path):
+    """Write ``[(start, end, text)]`` as an SRT.
+
+    Round-tripping through :func:`read_srt` is the only guarantee that matters:
+    every other tool in the kit reads what this writes, and a subtitle file is
+    a format everybody believes they can write until a comma-decimal locale
+    turns ``00:00:01,500`` into ``00:00:01.5``.
+    """
+    d = os.path.dirname(os.path.abspath(path))
+    if d and not os.path.isdir(d):
+        os.makedirs(d)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for i, (a, b, t) in enumerate(cues, 1):
+            f.write("%d\n%s --> %s\n%s\n\n"
+                    % (i, fmt_ts(a), fmt_ts(b), " ".join(str(t).split())))
+
+
 # ------------------------------------------------------------------------- words
 
 STOP = set("""a an the of to and or but is are was were be been am do does did

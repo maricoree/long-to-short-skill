@@ -78,8 +78,22 @@ def gaps_from(times, db, thr, min_gap):
     return out
 
 
-def in_gap(t, gaps):
-    return any(a <= t <= z for a, z in gaps)
+# How close to a silence a cue start has to be to count as landing in one.
+#
+# Zero is wrong, and wrong in a way that only shows up on a file whose cues
+# begin where speech does.  A synced cue starts ON a speech onset -- that is
+# the TRAILING EDGE of the preceding silence -- and `a <= t <= z` scores that
+# as a miss.  A human-authored file is usually a few tens of ms late of the
+# onset, so the old test mostly worked by accident; a transcript generated from
+# the audio has its starts exactly on the onset, and the first one tested came
+# back reading "at offset 0.00: 0%" and "pass --cap-shift -0.10" off a plateau
+# 1.8 s wide.  The tolerance is symmetric, so it also shifts the plateau's
+# upper edge up by TOL -- which is why the estimate subtracts it again.
+TOL = 0.15
+
+
+def in_gap(t, gaps, tol=0.0):
+    return any(a - tol <= t <= z + tol for a, z in gaps)
 
 
 def locate(needle, allw):
@@ -143,46 +157,95 @@ def main():
           "%d gaps >= %.2f s" % (dur, len(cues), speech, thr, len(gaps), a.min_gap))
 
     # ---------------------------------------------------------------- 1. offset
+    # ONE denominator for every offset.  Scoring each offset over only the cues
+    # that survive it is a trap: shifting far enough to push a cue off the front
+    # of the file SHRINKS the denominator and inflates the score, so the region
+    # past that point scores a free 100% and drags the plateau's top edge down
+    # with it.  Measured on the synthetic corpus: a file 0.50 s out came back as
+    # -0.70 s, because cue 1 sat at t=0 and vanished below -0.5.  A cue pushed
+    # out of the file is a miss, not an omission.
+    pool = [s for s, _, _ in cues if 0 <= s <= dur]
+    if not pool:
+        sl.die("every cue in %s starts outside the video (0..%.1f s) -- the SRT "
+               "does not belong to this file" % (a.srt, dur))
     best = []
     for off in np.arange(-2.0, 2.001, 0.05):
-        starts = [s + off for s, _, _ in cues if 0 <= s + off <= dur]
-        if starts:
-            hit = sum(1 for s in starts if in_gap(s, gaps))
-            best.append((hit / float(len(starts)), hit, len(starts), float(off)))
+        hit = sum(1 for s in pool if 0 <= s + off <= dur and in_gap(s + off, gaps, TOL))
+        best.append((hit / float(len(pool)), hit, len(pool), float(off)))
     best.sort(reverse=True)
-    print("\nSRT offset -- fraction of cue starts landing in a silence:")
-    for frac, hit, tot, off in best[:3]:
-        print("  %+5.2f s   %d/%d  (%.0f%%)" % (off, hit, tot, 100 * frac))
+    print("\nSRT offset -- fraction of cue starts landing in a silence "
+          "(within %.2f s of one):" % TOL)
+    for frac, hit, tot, o in best[:3]:
+        print("  %+5.2f s   %d/%d  (%.0f%%)" % (o, hit, tot, 100 * frac))
     # Offsets that all put every cue start in a silence form a plateau, not a
     # point, and the plateau is not centred on the truth: a cue starts when
     # speech starts, i.e. at the END of the preceding silence, so the plateau
-    # runs from the true offset down to (truth - gap width).  The UPPER edge is
-    # therefore the estimate -- which is what the reverse sort already picks.
-    # Print the width so a loose fit is visible rather than implied.
-    off = best[0][3] if best else 0.0
-    if best and best[0][0] > 0:
+    # runs from the true offset down to (truth - gap width), plus TOL at the
+    # top from the tolerance above.  So the estimate is the UPPER edge of the
+    # plateau, minus that tolerance -- which is what the reverse sort picks,
+    # corrected.  Print the width so a loose fit is visible rather than implied.
+    off = 0.0
+    if best[0][0] > 0:
         tie = [o for f, h, t, o in best if f >= best[0][0] - 1e-9]
         if len(tie) > 1 and max(tie) - min(tie) > 0.1:
             print("  (%.2f..%.2f all score the same -- the fit is only good to "
                   "about %.2f s; fine-tune by ear)" % (min(tie), max(tie),
                                                        max(tie) - min(tie)))
-    base = next((f for f, h, t, o in best if abs(o) < 1e-6), None)
-    if base is None:
-        b0 = [s for s, _, _ in cues if 0 <= s <= dur]
-        base = sum(1 for s in b0 if in_gap(s, gaps)) / float(len(b0)) if b0 else 0.0
+    # Every cue's window in offset-space shares the SAME upper edge -- a cue
+    # leaves its silence when it is pushed past the silence's far end, not when
+    # it enters -- so the top of the plateau is off_true + TOL, and the width
+    # below it is set by the widest gap, never by the narrowest.  Hence the top
+    # edge, and only the top edge, is the estimate.
+    off = round(best[0][3] - TOL, 2)
+    base = sum(1 for s in pool if in_gap(s, gaps, TOL)) / float(len(pool))
     print("  at offset 0.00: %.0f%%" % (100 * base))
-    if abs(off) < 0.05:
-        print("  -> the subtitles are already in sync; leave --cap-shift at 0.00")
-    else:
-        print("  -> cues run %+.2f s relative to the audio; pass --cap-shift %+.2f"
-              % (off, off))
     # The absolute fraction is NOT the test -- plenty of cue boundaries are
     # mid-sentence wraps and land in speech even on a perfectly synced file.
     # The test is the MARGIN over offset 0.00: a genuinely offset file jumps.
-    if off and best and best[0][0] < 1.6 * base + 0.05:
-        print("  !! only %.0f%% against %.0f%% at zero -- no clear constant offset.\n"
-              "     Leave --cap-shift at 0.00 and sync by ear."
+    # When it does not jump, say so INSTEAD of naming a shift, not as well as:
+    # a "pass --cap-shift -0.20" followed by "leave it at 0.00" is a coin the
+    # reader has to flip, and the first line is the one they will act on.
+    weak = bool(off) and best[0][0] < 1.6 * base + 0.05
+    if not best[0][1]:
+        # Nothing scored anywhere, so the sort order -- not the data -- picked
+        # `top`, and `off` above is noise with a plausible number of decimals.
+        # Say that rather than recommending a shift the evidence never showed.
+        print("  -> not ONE cue start lands in a silence at any offset in "
+              "+-2.00 s.\n     Either this SRT belongs to a different cut of "
+              "the video, or the\n     audio is not what it was authored "
+              "against.  Leave --cap-shift at\n     0.00 and read the cues by "
+              "eye before trusting any window below.")
+    elif abs(off) < 0.05:
+        print("  -> the subtitles are already in sync; leave --cap-shift at 0.00")
+    elif weak:
+        print("  -> NO clear constant offset: %.0f%% against %.0f%% at zero.\n"
+              "     Leave --cap-shift at 0.00 and sync by ear.  The best fit\n"
+              "     above is inside the noise, and acting on it would shift\n"
+              "     every caption for nothing."
               % (100 * best[0][0], 100 * base))
+        if base > 0.5:
+            print("     (This is what a transcript made from THIS audio looks\n"
+                  "     like -- its cues already start on speech onsets, so\n"
+                  "     there is no constant offset in it to find.  A subtitle\n"
+                  "     file written by a person for a different release is the\n"
+                  "     case this tool is for; that one reads near zero at 0.00\n"
+                  "     and near 100% at its true shift.)")
+    else:
+        print("  -> cues run %+.2f s relative to the audio; pass --cap-shift %+.2f"
+              % (off, off))
+        if best[0][0] < 0.80:
+            # A genuine offset puts nearly every cue start in a silence, so a
+            # fit that only catches two thirds of them is either a file with
+            # lots of mid-sentence breaks or a shift TOO BIG to be in range --
+            # a file 8 s out was measured scoring 56% here off a coincidence,
+            # because a cue landing in SOME silence is not hard when a 38 s file
+            # has eleven of them.  The search is only +-2.00 s; say so, because
+            # the reader cannot tell "partly right" from "wrong by a lot".
+            print("     Only %.0f%% of cue starts land in a silence even at "
+                  "that shift.  If the\n     real one is bigger than 2.00 s "
+                  "this search cannot see it -- check a\n     few cues against "
+                  "the audio by ear before trusting it."
+                  % (100 * best[0][0]))
 
     # ---------------------------------------------------------------- 2. window
     if a.check:

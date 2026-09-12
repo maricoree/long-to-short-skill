@@ -9,6 +9,7 @@ stage1.mp4
 *.wav
 look.png
 metadata.txt
+*.srt
 
 # working dirs
 job/

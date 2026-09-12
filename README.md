@@ -2,7 +2,7 @@
 
 # long-to-short
 
-**Point it at a long video and its subtitles. Get back a finished vertical short — captions burned in, audio untouched, upload metadata written.**
+**Point it at a long video — with subtitles or without. Get back a finished vertical short: captions burned in, audio untouched, upload metadata written.**
 
 A [Claude Code](https://claude.com/claude-code) skill, and four scripts you can also just run by hand.
 
@@ -19,8 +19,13 @@ A [Claude Code](https://claude.com/claude-code) skill, and four scripts you can 
 
 ## What it does
 
-You have an hour-long video and a subtitle file. You want a 20-second vertical
-clip out of it that looks deliberate, not like a crop someone did in a hurry.
+You have an hour-long video. You want a 20-second vertical clip out of it that
+looks deliberate, not like a crop someone did in a hurry.
+
+**You do not need a subtitle file.** Most people pointing at a long video do not
+have one, so the kit asks once and then makes it: an embedded text track if the
+file already carries one (exact, two seconds), and speech recognition if it does
+not (minutes, on CPU, on your own machine — no API key and nothing uploaded).
 
 ```
 1080×1920 · 60 fps · H.264 + AAC
@@ -56,6 +61,13 @@ pip install -r requirements.txt      # numpy, Pillow
 
 You also need **ffmpeg and ffprobe on your PATH**.
 
+If your video has no subtitles and none embedded, add a transcription backend —
+this is the only optional dependency in the kit:
+
+```bash
+pip install faster-whisper           # CTranslate2, no torch, int8 on CPU
+```
+
 To use it as a Claude Code skill, copy the folder into your skills directory:
 
 ```bash
@@ -73,6 +85,10 @@ at the video and the `.srt`.
 ## Quick start
 
 ```bash
+# 0 — no subtitles? see what the file already carries, then make the SRT
+python tools/transcribe.py long.mp4 --list-streams
+python tools/transcribe.py long.mp4 --out captions.srt
+
 # 1 — find the offset and a fragment worth cutting
 python tools/pick_fragment.py long.mp4 captions.srt --top 25
 
@@ -105,10 +121,99 @@ SRT offset -- fraction of cue starts landing in a silence:
 taste — the cue file was authored ahead of the speaker, by a constant. The test
 is not the 96%; it is the 96% against the **6% at offset zero**.
 
+## When there are no subtitles
+
+Most people pointing at a long video do not have an `.srt`, and "go and make
+one" is not an answer. `transcribe.py` makes it:
+
+```bash
+python tools/transcribe.py long.mp4 --list-streams   # what is already in the file?
+python tools/transcribe.py long.mp4 --out caps.srt   # make one
+```
+
+If you use the kit as a skill, Claude asks two things before it starts — whether
+you have a subtitle file or want one made, and how hard to try if it is making
+one — in a single round, then never asks again. The second question is put in
+minutes and megabytes rather than model names, because the trade is Claude's
+time, not yours. There is **no faster tier**: measured on a 6-core desktop CPU,
+`tiny`, `base` and `small` take about the same time on the same file — 71 s /
+90 s / 72 s for the same 397 s of audio, so `base` is the slowest of the three.
+A smaller model buys a smaller download, not a shorter wait.
+
+| | flag | costs | for |
+|---|---|---|---|
+| the default | `--model small` | 464 MB the first time, nothing after | clean narration, one speaker |
+| hard audio | `--model medium` | 1.5 GB the first time, and slower | accents, crosstalk, music under speech |
+
+`tiny` is deliberately not on that list — see below.
+
+| the file has | what happens | cost |
+|---|---|---|
+| a text subtitle track | extracted with ffmpeg — the author's own timings, untouched | ~2 s |
+| a bitmap track (PGS, VobSub, DVB) | nothing can be done with ffmpeg; that is OCR | — |
+| nothing | faster-whisper, int8, on your own CPU | minutes |
+
+Nothing is uploaded and no key is needed — an hour of audio is CPU work on your
+own machine. `--model small` is the default and the right default; `--model
+medium` is slower and better on hard audio or heavy accents. `base` and `tiny`
+sit below the default: they download less (141 MB and 75 MB), they are not
+faster, and `tiny` is worse at picking the language. `--lang ru` skips language
+detection and beats it. Measured on a 6-core desktop CPU: `small` runs at about
+5.5x realtime, so an hour of video is roughly ten minutes of waiting, and a slow
+laptop is two to three times that. It prints its estimate before it starts and a
+percentage while it runs, so a long file is never a black box.
+
+**The first run downloads the model.** Nothing is fetched unless speech
+recognition is actually needed — a text subtitle track or a supplied `.srt`
+costs no download. When it is needed, the weights come from HuggingFace once and
+are cached in `~/.cache/huggingface/hub` from then on. No account or token is
+required, which also means an unauthenticated, rate-limited fetch: measured at
+about 1 MB/s, so the default `small` is 464 MB and about eight minutes before
+transcription starts. `tiny` is 75 MB, `base` 141 MB, `medium` 1.5 GB,
+`large-v3` 2.9 GB. Set `HF_TOKEN` if you have one: the fetch is unauthenticated
+precisely because no token is required, and anonymous traffic is rate-limited.
+
+That download is **silent** — `huggingface_hub` only draws its progress bar on a
+terminal, so run by an agent or piped into a log it shows nothing at all and
+looks like a hang. The tool therefore prints the size, the cache path, and
+whether the weights are already there, so the wait is never a guess.
+
+**Do not drop to `tiny` to save that time.** The language detector goes first,
+and a wrong language does not blur the transcript, it replaces it: on clean
+English narration `tiny` called it Russian at p=0.69 and returned Cyrillic
+transliteration of English sounds — over a whole 397 s file, every cue of it.
+
+**No model size is safe from that, and neither is a short file.** On that same
+397 s file `base` said Latvian at p=0.40 and `small` said Russian at p=0.31 —
+and a 20 s cut of that same audio was still misread, `ru` at p=0.26, so length
+is not the variable. Forcing `--lang en` gave clean correct English at either
+size: the audio was never ambiguous, only the detector was. So when you can name
+the language, pass `--lang` — it skips detection and beats it. When you cannot,
+read the confidence: the tool calls out anything below 0.70, and that number is
+the detector shrugging rather than deciding. If the text comes out in the wrong
+language, re-run with `--lang en --force` (the tool will not overwrite an
+existing `.srt` without `--force`).
+
+Whisper also invents text where there is no speech — over music, over silence,
+and worst of all in loops — so segments are dropped on the model's own
+confidence, on boilerplate, and on immediate self-repetition, and **every drop
+is printed with its time and its reason**. A filter that drops things silently
+is a filter nobody can debug.
+
+**A transcript made here has no offset to find.** That matters, because the next
+step spends its whole time measuring one. A file a human authored runs ahead of
+the speaker by a constant — that is what "the captions run fast" is — but a file
+made here is timed off this video's own audio, so expect `pick_fragment.py` to
+report about `0.00` and leave `--cap-shift` alone. A weak reading is the
+expected answer here, not a discovery, and not a reason to hunt for a shift that
+is not there.
+
 ## The tools
 
 | tool | answers | cost |
 |---|---|---|
+| `transcribe.py <video> --list-streams` | does this file already carry subtitles, and in what language | ~2 s |
+| `transcribe.py <video>` | the missing SRT — an embedded track if there is one, else speech recognition | 2 s, or minutes |
 | `pick_fragment.py <video> <srt>` | the SRT offset, the silence gaps, and every unused 15-30 s window with its opening phrase | ~10 s |
 | `pick_fragment.py … --check T0 DUR` | are both ends in a silence, are any cues cut into, how many caption lines | ~10 s |
 | `build_short.py --src … --t0 … --dur … --out …` | the finished MP4 | ~35 s |
@@ -121,7 +226,11 @@ so every caption-only fix (a shift, a hold, a re-split) uses it.
 
 ```mermaid
 flowchart LR
-    SRC["long video<br/>+ captions.srt"] --> PICK["pick_fragment.py"]
+    SRC["long video"] --> HAS{"subtitles?"}
+    HAS -->|"yes"| SRT["captions.srt"]
+    HAS -->|"no"| TR["transcribe.py<br/><i>embedded track, else whisper</i>"]
+    TR --> SRT
+    SRT --> PICK["pick_fragment.py"]
     PICK -->|"offset · windows"| BUILD["build_short.py"]
     BUILD -->|"pass 1 · ~20 s"| ST1["stage1.mp4<br/><i>blurred bg + fragment</i>"]
     ST1 -->|"pass 2 · ~15 s"| OUT["short.mp4<br/><i>+ burned-in captions</i>"]
@@ -231,6 +340,12 @@ frame six times while believing you checked six.
 - **ffmpeg** and **ffprobe** on `PATH`
 - **Python 3.8+** with `numpy` and `Pillow` (no OpenCV)
 - A heavy display font — the search falls back to whatever your system has
+- **Only when the video has no subtitles at all:** `faster-whisper`
+  (`pip install faster-whisper`). It is deliberately *not* in
+  `requirements.txt` — nothing else here needs it, and it downloads a model on
+  first use. A GPU is used if there is one and the CUDA libraries actually
+  load; if they do not, it says so and falls back to the CPU rather than
+  failing.
 
 ## Licence
 

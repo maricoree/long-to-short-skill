@@ -27,6 +27,15 @@ echo
 echo "Check your dependencies:"
 command -v ffmpeg  >/dev/null && echo "  ffmpeg   ok" || echo "  ffmpeg   MISSING -- put it on PATH"
 command -v ffprobe >/dev/null && echo "  ffprobe  ok" || echo "  ffprobe  MISSING -- put it on PATH"
-python -c "import numpy, PIL" 2>/dev/null \
-  && echo "  numpy+Pillow  ok" \
-  || echo "  numpy+Pillow  MISSING -- pip install -r requirements.txt"
+if python -c "import numpy, PIL" 2>/dev/null; then
+  echo "  numpy+Pillow  ok"
+else
+  echo "  numpy+Pillow  MISSING -- pip install -r requirements.txt"
+fi
+
+if python -c "import faster_whisper" 2>/dev/null; then
+  echo "  faster-whisper  ok"
+else
+  echo "  faster-whisper  absent -- optional, and only needed for a video that"
+  echo "                  has no subtitles: pip install faster-whisper"
+fi

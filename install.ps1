@@ -44,3 +44,11 @@ if ($LASTEXITCODE -eq 0) {
 } else {
     Write-Host '  numpy+Pillow  MISSING -- pip install -r requirements.txt'
 }
+
+python -c "import faster_whisper" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host '  faster-whisper  ok'
+} else {
+    Write-Host '  faster-whisper  absent -- optional, and only needed for a video'
+    Write-Host '                  that has no subtitles: pip install faster-whisper'
+}

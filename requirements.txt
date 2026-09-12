@@ -2,3 +2,12 @@
 # packages and cannot be installed from here.
 numpy>=1.20
 Pillow>=8.0
+
+# Optional, and needed only when the video has no subtitles anywhere:
+#
+#     pip install faster-whisper
+#
+# Left out on purpose. It pulls in CTranslate2 and downloads a model the first
+# time it runs, which is not a cost to impose on someone who already has an
+# .srt. tools/transcribe.py uses it if it is there and says what to install if
+# it is not.
