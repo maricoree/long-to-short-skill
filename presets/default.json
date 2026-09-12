@@ -36,8 +36,8 @@
     "strip_y/strip_h is the region pass 2 overlays. Keeping it 1080x300 instead",
     "of a whole frame is what keeps the overlay at ~15 s instead of minutes.",
     "top is measured inside the strip, so the cap line lands at canvas y 1360.",
-    "min_hold is a floor on the shortest line window, and is only valid while",
-    "n_lines * min_hold <= duration -- the tool warns when it is not."
+    "min_hold is a requested floor within each SRT cue; it is reduced when",
+    "n_lines * min_hold > cue_duration, preserving pauses between cues."
   ],
   "captions": {
     "strip_y": 1300,

@@ -84,6 +84,18 @@ def main():
     tags = re.sub(r"\s+", " ", tags.replace("\n", " ")).strip()
     fails, warns = [], []
 
+    # Explicit hashtags belong in the deliverable, without duplicating existing ones.
+    requested = [h if h.startswith("#") else "#" + h
+                 for h in re.split(r"[,\s]+", a.hashtags) if h]
+    existing = set(re.findall(r"#\w+", desc))
+    added = []
+    for tag in requested:
+        if tag not in existing:
+            added.append(tag)
+            existing.add(tag)
+    if added:
+        desc = (desc + "\n\n" + " ".join(added)).strip()
+
     # ------------------------------------------------------------- field limits
     if len(tags) > TAG_LIMIT:
         fails.append("tags are %d chars, over the %d limit -- cut %d"
@@ -94,9 +106,7 @@ def main():
         warns.append("empty description")
 
     tags_in_desc = re.findall(r"#\w+", desc)
-    hs = [h if h.startswith("#") else "#" + h
-          for h in re.split(r"[,\s]+", a.hashtags) if h]
-    all_hs = hs or tags_in_desc
+    all_hs = list(dict.fromkeys(tags_in_desc))
     if len(all_hs) > 3:
         warns.append("%d hashtags -- Shorts surfaces show about 3; keep the "
                      "three strongest" % len(all_hs))

@@ -322,10 +322,10 @@ equivalent and is *subtractive* — 41 levels off every channel — and on a nig
 scene sitting at 20-50 it crushes the background to a measured 0-8, i.e. pure
 black. When a background looks too dark, this is the bug to check first.
 
-**A `min_hold` that does not fit beats the sync.** If
-`n_lines × min_hold > duration`, every line comes out exactly `min_hold` long,
-the track becomes a rigid grid, it drifts off the narration and pushes the first
-line before the fragment even starts. `build_short.py` checks this and says so.
+**A `min_hold` must fit inside each cue.** When
+`n_lines × min_hold > cue_duration`, the renderer reduces the floor for that
+cue and reports it. Lines remain inside the cue's original time interval;
+silence between cues stays free of captions.
 
 **An end that lands in speech is a word cut in half**, and no numeric check on
 the render will see it. That is why `--check` exists and why both ends must
@@ -351,3 +351,24 @@ frame six times while believing you checked six.
 
 MIT — see [LICENSE](LICENSE). Use it, change it, ship it, sell it; just keep the
 copyright notice with the source.
+
+
+## Render jobs and verification
+
+Each render without `--job` creates a unique temporary directory and prints its
+path. To edit captions later, supply that path with `--caps-only --job PATH`.
+Alternatively, use an explicit `--job PATH` for the initial render. Keep the
+`stage1.mp4` and `stage1.json` files together: reuse validates the source file,
+fragment times, composition settings and intermediate file. Caption settings
+may change. A lock prevents two processes from writing the same job at once.
+After a terminated process, remove `.render.lock` only after checking that no
+render is still using that directory.
+
+Caption holds are bounded by each SRT cue. When the requested minimum hold
+cannot fit inside a cue, it is reduced for that cue and reported. Captions
+never extend into the following silence. Tokens longer than the character
+limit are split into smaller pieces.
+
+Run regression tests with `python -m unittest discover -s tests -v`.
+The integration test renders a synthetic clip and checks caption-only reuse;
+it requires FFmpeg, ffprobe and an installed display font. CI installs these.

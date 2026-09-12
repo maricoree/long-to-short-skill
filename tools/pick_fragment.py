@@ -247,6 +247,10 @@ def main():
                   "the audio by ear before trusting it."
                   % (100 * best[0][0]))
 
+    # Use exactly the shift recommended above for every downstream calculation.
+    if not best[0][1] or weak or abs(off) < 0.05:
+        off = 0.0
+
     # ---------------------------------------------------------------- 2. window
     if a.check:
         t0, d = a.check

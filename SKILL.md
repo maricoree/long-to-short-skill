@@ -366,21 +366,13 @@ belongs to a word (*you're*, *that's*), and **13-15 characters per line**.
   shadows (16 px blur at 0.55, 5 px blur at 0.75). That is the "beautiful
   shadow" look.
 
-### `min_hold` must be feasible, or it beats the sync
+### `min_hold` is bounded by each cue
 
-A lone short line once got a 0.23 s window ("you") — an unreadable flash, which
-is part of what "the captions run fast" turns out to mean. `min_hold` floors the
-shortest window, but **the floor is only valid if `n_lines × min_hold ≤ dur`**:
-
-- 28 lines over 23.3 s at 0.85 s: every line came out *exactly* 0.85 s, the
-  track became a rigid grid, it drifted off the narration and pushed the first
-  line **before the fragment started** (28 × 0.85 = 23.8 s > 23.3 s, so the
-  floor won over the sync). At 0.70 s the holds are 0.70-1.38 s with a worst
-  line movement of 0.45 s.
-
-`build_short.py` checks this and says so when it does not hold. Do not just
-raise the floor until it "feels" readable — sweep it and look at the drift it
-costs.
+The requested minimum hold is applied independently inside each SRT cue.
+If `n_lines × min_hold > cue_duration`, the renderer lowers the hold for that
+cue and reports it. It never moves captions into surrounding silence to meet
+the floor. Choose longer lines or a different fragment if the speech is too
+fast to read comfortably.
 
 Note that "more readable lines" and "13-15 characters" fight each other: 364
 characters of speech over 23.3 s is ~15.6 chars/s, and it cannot be slowed
@@ -470,3 +462,24 @@ Verify the delivered file with `ffprobe` **and** the look sheet — and if you
 change the renderer, re-render a known job and compare the stage-1 checksum with
 the delivered one; byte-identical output is how you know a refactor changed
 nothing.
+
+
+## Render jobs and verification
+
+Each render without `--job` creates a unique temporary directory and prints its
+path. To edit captions later, supply that path with `--caps-only --job PATH`.
+Alternatively, use an explicit `--job PATH` for the initial render. Keep the
+`stage1.mp4` and `stage1.json` files together: reuse validates the source file,
+fragment times, composition settings and intermediate file. Caption settings
+may change. A lock prevents two processes from writing the same job at once.
+After a terminated process, remove `.render.lock` only after checking that no
+render is still using that directory.
+
+Caption holds are bounded by each SRT cue. When the requested minimum hold
+cannot fit inside a cue, it is reduced for that cue and reported. Captions
+never extend into the following silence. Tokens longer than the character
+limit are split into smaller pieces.
+
+Run regression tests with `python -m unittest discover -s tests -v`.
+The integration test renders a synthetic clip and checks caption-only reuse;
+it requires FFmpeg, ffprobe and an installed display font. CI installs these.

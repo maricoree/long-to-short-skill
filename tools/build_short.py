@@ -25,6 +25,8 @@ hard-coded: its dimensions are probed, and the fragment window's aspect
 decides the crop.
 """
 import argparse
+import json
+from contextlib import contextmanager
 import os
 import re
 import subprocess
@@ -60,7 +62,10 @@ def chunk_text(text, limit, min_chars=12):
     first place; the small per-line charge stops it splitting just to dodge a
     penalty.
     """
-    ws = text.split()
+    if limit <= 0:
+        sl.die("caption character limit must be positive")
+    ws = [word[i:i + limit] for word in text.split()
+          for i in range(0, len(word), limit)]
     n = len(ws)
     if not n:
         return []
@@ -124,57 +129,36 @@ def build_phrases(ctx):
     cues = [(a + shift, b + shift, t) for a, b, t in sl.read_srt(ctx["srt"])]
     font = ImageFont.truetype(ctx["font"], int(round(cap["font_px"] * cap["ss"])))
 
-    flat = []                                   # [text, start, end]
-    for s, e, text in cues:
-        # A cue that STARTS before the fragment does is one we cut into: its
-        # first words are not on screen.  DROP it rather than clipping it to
-        # the fragment start, which produced 0.02 s stubs of the previous
-        # sentence on frame 0.
-        if not text or e < t0 or s < t0 - 0.001 or s > t_end:
+    flat = []
+    for s, e, text in sorted(cues):
+        if not text or s < t0 - 0.001 or s >= t_end:
             continue
-        e = min(e, t_end)
+        s, e = max(s, t0), min(e, t_end)
         parts = chunk_text(clean(text), cap["chars"])
-        # apportion the cue's span by characters, so a line appears about when
-        # it is spoken rather than all at once at the cue start.
-        lens = [len(p) for p in parts]
-        tot = float(sum(lens)) or 1.0
-        acc = 0
-        for p, L in zip(parts, lens):
-            flat.append([p, s + (acc / tot) * (e - s), None])
-            acc += L
+        if e <= s or not parts:
+            continue
+        # Distribute each cue independently: a hold must never consume silence
+        # or move text outside its source cue. Reduce infeasible floors locally.
+        hold = min(cap["min_hold"], (e - s) / len(parts))
+        if hold < cap["min_hold"]:
+            print("  note: reducing min_hold to %.3f s inside cue %.2f..%.2f"
+                  % (hold, s, e))
+        total = float(sum(map(len, parts)))
+        starts, acc = [], 0
+        for part in parts:
+            starts.append(s + acc / total * (e - s))
+            acc += len(part)
+        for i in range(1, len(starts)):
+            starts[i] = max(starts[i], starts[i - 1] + hold)
+        starts[-1] = min(starts[-1], e - hold)
+        for i in range(len(starts) - 2, -1, -1):
+            starts[i] = min(starts[i], starts[i + 1] - hold)
+        flat.extend([part, start, end] for part, start, end in
+                    zip(parts, starts, starts[1:] + [e]))
 
     if not flat:
         sl.die("no captions fall inside %.2f..%.2f s.\n"
-               "  Check --t0/--dur, and the SRT offset from pick_fragment.py."
-               % (t0, t_end))
-
-    # A lone short line once got a 0.23 s window ("you") -- a flash you cannot
-    # read.  MIN_HOLD is a floor on the shortest window, NOT a uniform cadence:
-    # set too high, every line comes out exactly MIN_HOLD long, the track
-    # becomes a rigid grid, it drifts off the narration and pushes the first
-    # line before the fragment even starts.
-    #
-    # So the floor is only valid when it is FEASIBLE: n_lines * floor <= DUR.
-    # Rather than let a too-high floor silently win over the sync, say so.
-    hold = cap["min_hold"]
-    need = len(flat) * hold
-    if need > dur:
-        print("  !! min_hold %.2f x %d lines = %.2f s, but only %.2f s of "
-              "fragment.\n     The floor will beat the sync and the captions "
-              "will drift off the narration.\n     Lower --min-hold to about "
-              "%.2f, or use a longer fragment."
-              % (hold, len(flat), need, dur, dur / float(len(flat))))
-
-    for i in range(1, len(flat)):
-        flat[i][1] = max(flat[i][1], flat[i - 1][1] + hold)
-    if flat[-1][1] + hold > t_end:
-        flat[-1][1] = t_end - hold
-        for i in range(len(flat) - 2, -1, -1):
-            flat[i][1] = max(t0, min(flat[i][1], flat[i + 1][1] - hold))
-
-    for i in range(len(flat) - 1):
-        flat[i][2] = flat[i + 1][1]
-    flat[-1][2] = t_end
+               "  Check --t0/--dur and the SRT offset." % (t0, t_end))
 
     made = [make_phrase_image(p, font, cap) for p, _, _ in flat]
     ss = cap["ss"]
@@ -258,11 +242,12 @@ def stage1(ctx):
     # should come out at roughly `darken`.
     vf = (
         "[0:v]split=2[a][b];"
-        "[a]scale=%d:%d,crop=%d:%d:%d:0,scale=%d:%d,gblur=sigma=%g,"
+        "[a]scale=%d:%d,crop=%d:%d:%d:%d,scale=%d:%d,gblur=sigma=%g,"
         "colorchannelmixer=rr=%g:gg=%g:bb=%g,scale=%d:%d:flags=bicubic,setsar=1[bg];"
         "[b]crop=%d:%d:%d:%d,scale=%d:%d,setsar=1[mn];"
         "[bg][mn]overlay=%d:%d:format=auto,format=yuv420p[out]"
-        % (cov_w, cov_h, W, cov_h, (cov_w - W) // 2, small_w, small_h, blur,
+        % (cov_w, cov_h, W, H, (cov_w - W) // 2, (cov_h - H) // 2,
+           small_w, small_h, blur,
            dark, dark, dark, W, H,
            cw, ch, cx, cy, mw, mh, mx, my))
     cmd = ["ffmpeg", "-y", "-v", "error", "-stats",
@@ -296,8 +281,52 @@ def caps(ctx):
         emit_captions(p, ctx)
     except BrokenPipeError:
         pass                                  # ffmpeg died; its stderr says why
+    except BaseException:
+        p.kill()
+        p.wait()
+        raise
+    finally:
+        try:
+            p.stdin.close()
+        except BrokenPipeError:
+            pass
     if p.wait() != 0:
         raise SystemExit("pass 2 failed -- see the ffmpeg output above")
+
+
+def composition_signature(ctx):
+    source = os.path.realpath(ctx["src"])
+    stat = os.stat(source)
+    return {"version": 1, "source": source, "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns, "t0": ctx["t0"], "dur": ctx["dur"],
+            "layout": {k: ctx["lay"][k] for k in ("canvas", "fps", "main", "bg")}}
+
+
+def validate_stage1(ctx):
+    path = os.path.join(ctx["job"], "stage1.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+        stat = os.stat(ctx["stage1"])
+    except (OSError, ValueError):
+        sl.die("missing or invalid stage1 in --job; render the composition first")
+    if (saved.get("composition") != composition_signature(ctx)
+            or saved.get("artifact") != [stat.st_size, stat.st_mtime_ns]):
+        sl.die("stage1 does not match this source/fragment/layout; render it again")
+
+
+@contextmanager
+def job_lock(job):
+    path = os.path.join(job, ".render.lock")
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        sl.die("job is already locked: %s (after a crash, remove .render.lock)" % job)
+    try:
+        os.close(fd)
+        yield
+    finally:
+        os.unlink(path)
 
 
 # -------------------------------------------------------------------------- main
@@ -335,6 +364,12 @@ def parse():
 
 def main():
     a = parse()
+    if a.stage1_only and a.caps_only:
+        sl.die("--stage1-only and --caps-only are mutually exclusive")
+    if a.caps_only and not a.job:
+        sl.die("--caps-only requires --job from the original render")
+    if a.t0 < 0 or a.dur <= 0:
+        sl.die("--t0 must be nonnegative and --dur positive")
     if not os.path.exists(a.src):
         sl.die("source not found: %s" % a.src)
     if not a.stage1_only and not a.srt:
@@ -342,20 +377,24 @@ def main():
 
     lay = sl.load_layout(a.preset, a.canvas)
     cap = lay["captions"]
-    if a.chars:
+    if a.chars is not None:
         cap["chars"] = a.chars
     if a.font_px:
         cap["font_px"] = a.font_px
     if a.min_hold is not None:
         cap["min_hold"] = a.min_hold
 
+    if cap["chars"] <= 0 or cap["min_hold"] < 0:
+        sl.die("--chars must be positive and --min-hold nonnegative")
+
     src_w, src_h, src_fps, src_dur = sl.probe(a.src)
     if a.t0 + a.dur > src_dur > 0:
         print("  note: %.2f..%.2f s runs past the end of the source (%.2f s)"
               % (a.t0, a.t0 + a.dur, src_dur))
 
-    job = a.job or os.path.join(tempfile.gettempdir(), "long-to-short")
+    job = a.job or tempfile.mkdtemp(prefix="long-to-short-")
     os.makedirs(job, exist_ok=True)
+    print("job      %s" % os.path.abspath(job))
 
     ctx = {
         "lay": lay, "src": a.src, "srt": a.srt, "out": a.out, "job": job,
@@ -381,11 +420,21 @@ def main():
         # second, not the thirty-five seconds pass 1 takes.
         ctx["font"] = sl.resolve_font(a.font or lay.get("font"))
 
-    if not a.caps_only:
-        stage1(ctx)
-    if not a.stage1_only:
-        caps(ctx)
-        print("-> %s  (%.1f MB)" % (a.out, os.path.getsize(a.out) / 1e6))
+    with job_lock(job):
+        if a.caps_only:
+            validate_stage1(ctx)
+        else:
+            manifest = os.path.join(job, "stage1.json")
+            if os.path.exists(manifest):
+                os.unlink(manifest)
+            stage1(ctx)
+            stat = os.stat(ctx["stage1"])
+            with open(manifest, "w", encoding="utf-8") as f:
+                json.dump({"composition": composition_signature(ctx),
+                           "artifact": [stat.st_size, stat.st_mtime_ns]}, f)
+        if not a.stage1_only:
+            caps(ctx)
+            print("-> %s  (%.1f MB)" % (a.out, os.path.getsize(a.out) / 1e6))
 
 
 if __name__ == "__main__":

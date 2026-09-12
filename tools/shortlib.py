@@ -53,7 +53,8 @@ def read_srt(path):
     """
     if not os.path.exists(path):
         die("subtitle file not found: %s" % path)
-    txt = open(path, encoding="utf-8-sig", errors="replace").read()
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        txt = f.read()
     cues = []
     for block in re.split(r"\n\s*\n", txt.strip()):
         lines = [l for l in block.splitlines() if l.strip()]
@@ -65,8 +66,8 @@ def read_srt(path):
         g = [int(x) for x in m.groups()]
         a = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000.0
         b = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000.0
-        body = [l for l in lines
-                if not re.match(r"^\d+$", l.strip()) and "-->" not in l]
+        time_line = next(i for i, line in enumerate(lines) if _SRT_TIME.search(line))
+        body = lines[time_line + 1:]
         cues.append((a, b, clean_markup(" ".join(x.strip() for x in body))))
     return cues
 
