@@ -1,0 +1,8 @@
+# Normalise line endings on commit so a shell script authored on Windows still
+# runs on Unix, and vice versa.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+*.png binary
+*.ttf binary
+*.otf binary

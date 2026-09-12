@@ -1,0 +1,64 @@
+{
+  "name": "default",
+
+  "_comment": [
+    "The shipped look. Every pixel value here was measured off a reference",
+    "screenshot of the target frame, not invented -- see 'Deriving a look' in",
+    "the README for the one-factor method, which is how you redo these for your",
+    "own reference.",
+    "",
+    "A preset is merged over the built-in default, so you only need the keys you",
+    "change: a file containing just {\"captions\": {\"font_px\": 64}} is valid.",
+    "Run with --canvas WxH to scale every pixel value uniformly; a canvas of a",
+    "different ASPECT is an error rather than a silent stretch."
+  ],
+
+  "canvas": [1080, 1920],
+  "fps": 60,
+
+  "_main": [
+    "The fragment window, in canvas pixels. Its aspect decides the source crop:",
+    "the source is centre-cropped to 1056:960 = 1.1 and scaled to exactly this",
+    "box. That is NOT a 16:9 fit (a 16:9 fit at 1056 wide would be 594 tall) --",
+    "the frame is scaled to the window's height and the sides are cropped."
+  ],
+  "main": { "x": 12, "y": 238, "w": 1056, "h": 960 },
+
+  "_bg": [
+    "The same frame cover-scaled to the whole canvas from the SOURCE'S OWN",
+    "aspect, blurred, and multiplied down. darken is a multiply: out = in * 0.5.",
+    "Do not express this as a brightness offset -- that is subtractive and",
+    "crushes dark scenes to pure black."
+  ],
+  "bg": { "blur": 6.0, "darken": 0.5 },
+
+  "_captions": [
+    "strip_y/strip_h is the region pass 2 overlays. Keeping it 1080x300 instead",
+    "of a whole frame is what keeps the overlay at ~15 s instead of minutes.",
+    "top is measured inside the strip, so the cap line lands at canvas y 1360.",
+    "min_hold is a floor on the shortest line window, and is only valid while",
+    "n_lines * min_hold <= duration -- the tool warns when it is not."
+  ],
+  "captions": {
+    "strip_y": 1300,
+    "strip_h": 300,
+    "top": 60,
+    "mid": 540,
+    "chars": 15,
+    "font_px": 80,
+    "stroke_px": 5.5,
+    "rise": 20.0,
+    "fade": 0.10,
+    "rise_t": 0.18,
+    "min_hold": 0.70,
+    "ss": 2,
+    "pad": 30,
+    "shadows": [[16, 14, 0.55], [5, 6, 0.75]]
+  },
+
+  "_font": [
+    "null -> search the usual font directories for a heavy display face.",
+    "Set an absolute path here, or pass --font, to pin one."
+  ],
+  "font": null
+}

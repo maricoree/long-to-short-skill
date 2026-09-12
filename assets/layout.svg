@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 2100" width="1660" height="2100" role="img" aria-label="The 1080x1920 canvas: a blurred darkened background, the fragment window above the middle, and the caption line below it">
+  <defs>
+    <linearGradient id="blurred" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"    stop-color="#3c4a63"/>
+      <stop offset="0.28" stop-color="#6b5a4a"/>
+      <stop offset="0.55" stop-color="#2c3a4e"/>
+      <stop offset="0.8"  stop-color="#4a3f52"/>
+      <stop offset="1"    stop-color="#232c3c"/>
+    </linearGradient>
+    <linearGradient id="framegrab" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"    stop-color="#7d8fb0"/>
+      <stop offset="0.3"  stop-color="#c9a879"/>
+      <stop offset="0.62" stop-color="#5d7391"/>
+      <stop offset="1"    stop-color="#8b7a9c"/>
+    </linearGradient>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+    <clipPath id="canvasclip">
+      <rect x="60" y="60" width="1080" height="1920" rx="26"/>
+    </clipPath>
+    <style>
+      .lbl  { font: 400 32px ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #98a4bb; }
+      .lbl2 { font: 600 34px ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #e2e9f5; }
+      .num  { font: 400 29px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #7f8ca3; }
+      .cap  { font: 900 84px ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+              fill: #fff; stroke: #000; stroke-width: 7px; paint-order: stroke fill; }
+      .lead { stroke: #4a5872; stroke-width: 2px; stroke-dasharray: 7 8; fill: none; }
+      .dim  { stroke: #39455e; stroke-width: 2px; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="1660" height="2100" fill="#0d1017"/>
+
+  <!-- ── the canvas ─────────────────────────────────────────────────────── -->
+  <rect x="60" y="60" width="1080" height="1920" rx="26" fill="#12151d" stroke="#2b3243" stroke-width="3"/>
+
+  <!-- background: the same frame cover-scaled, blurred, multiplied down -->
+  <g clip-path="url(#canvasclip)">
+    <rect x="60" y="60" width="1080" height="1920" fill="url(#blurred)" filter="url(#soft)" opacity="0.65"/>
+  </g>
+  <g clip-path="url(#canvasclip)">
+    <rect x="60" y="60" width="1080" height="1920" fill="#000" opacity="0.32"/>
+  </g>
+
+  <!-- the fragment window: centre-cropped, above the middle -->
+  <rect x="72" y="298" width="1056" height="960" rx="10" fill="url(#framegrab)"/>
+  <rect x="72" y="298" width="1056" height="960" rx="10" fill="none" stroke="#93aade" stroke-width="3" opacity="0.9"/>
+
+  <!-- the caption line -->
+  <text class="cap" x="600" y="1436" text-anchor="middle" filter="url(#glow)">the trick is</text>
+
+  <!-- ── annotations ────────────────────────────────────────────────────── -->
+
+  <path class="lead" d="M1128 168 L1176 168"/>
+  <text class="lbl2" x="1196" y="156">background</text>
+  <text class="lbl"  x="1196" y="198">the same frame</text>
+  <text class="lbl"  x="1196" y="238">cover-scaled, blurred</text>
+  <text class="lbl"  x="1196" y="278">multiplied down, ×0.5</text>
+
+  <path class="lead" d="M1128 778 L1176 778"/>
+  <text class="lbl2" x="1196" y="766">fragment</text>
+  <text class="lbl"  x="1196" y="808">1056 × 960</text>
+  <text class="lbl"  x="1196" y="848">at (12, 238)</text>
+  <text class="lbl"  x="1196" y="888">centre crop</text>
+
+  <path class="lead" d="M900 1360 L1176 1360"/>
+  <text class="lbl2" x="1196" y="1348">caption</text>
+  <text class="lbl"  x="1196" y="1390">cap-line top</text>
+  <text class="lbl"  x="1196" y="1430">y = 1360</text>
+  <text class="lbl"  x="1196" y="1470">≤ 15 chars</text>
+
+  <!-- the window's vertical extent -->
+  <path class="dim" d="M46 298 L46 1258"/>
+  <path class="dim" d="M36 298 L56 298 M36 1258 L56 1258"/>
+  <text class="num" x="28" y="778" text-anchor="middle" transform="rotate(-90 28 778)">y 238 … 1198</text>
+
+  <!-- what the window does to the source -->
+  <text class="num" x="600" y="1305" text-anchor="middle">the 16:9 source, scaled to 960 tall and centre-cropped to 1056 wide</text>
+  <text class="num" x="600" y="1343" text-anchor="middle">1188 × 1080 at (366, 0) — never a 16:9 fit, which would leave bars</text>
+
+  <!-- canvas size -->
+  <path class="dim" d="M60 2020 L1140 2020"/>
+  <path class="dim" d="M60 2010 L60 2030 M1140 2010 L1140 2030"/>
+  <text class="num" x="600" y="2075" text-anchor="middle">1080 × 1920 @ 60 fps</text>
+</svg>

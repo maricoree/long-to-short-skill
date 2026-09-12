@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+
+# renders and their by-products
+stage1.mp4
+*.mp4
+*.mkv
+*.mov
+*.wav
+look.png
+metadata.txt
+
+# working dirs
+job/
+out/
+.venv/
+venv/
